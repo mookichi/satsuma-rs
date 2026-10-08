@@ -66,7 +66,7 @@ Common options:
 | `--schreier-cuts` / `--binary-clauses` | accepted for compatibility |
 | `--add-reduced-as-unit` | keep models valid for the original formula |
 | `--opt` / `--no-opt` | generator support shortening (default on) |
-| `--sym-timeout MS` | detection budget per round (default 10000) |
+| `--sym-timeout MS` | detection budget per round (default 2000) |
 | `--sym-pairs N` | max pair attempts per cell (default 512) |
 | `--sym-nodes N` | max search nodes per pair (default 50000) |
 | `--sr` / `--veripb` / `--bsr` | proof format (default SR) |

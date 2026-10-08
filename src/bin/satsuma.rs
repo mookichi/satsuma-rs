@@ -34,7 +34,7 @@ fn print_help() {
     eprintln!("   --opt-random [N]        Maximum number of random generators added");
     eprintln!("   --opt-reopt             Optimizes generators twice");
     eprintln!("   --add-reduced-as-unit   Keep satisfying assignments valid for the original formula");
-    eprintln!("   --sym-timeout [MS]    Symmetry detection budget per round (default 10000)");
+    eprintln!("   --sym-timeout [MS]    Symmetry detection budget per round (default 2000)");
     eprintln!("   --sym-pairs [N]       Max automorphism pair attempts per cell (default 512)");
     eprintln!("   --sym-nodes [N]       Max search nodes per pair attempt (default 50000)");
     eprintln!("   --no-opt              Disable generator support shortening");

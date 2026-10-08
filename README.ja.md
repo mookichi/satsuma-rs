@@ -65,7 +65,7 @@ cat formula.cnf | ./target/release/satsuma fix --proof-file proof.out > out.cnf
 | `--schreier-cuts` / `--binary-clauses` | 互換性のため受理 |
 | `--add-reduced-as-unit` | 元の式に有効なモデルを維持 |
 | `--opt` / `--no-opt` | 生成子サポート短縮（デフォルトON） |
-| `--sym-timeout MS` | ラウンドあたりの検出予算（デフォルト10000） |
+| `--sym-timeout MS` | ラウンドあたりの検出予算（デフォルト2000） |
 | `--sym-pairs N` | セルあたりの最大ペア試行数（デフォルト512） |
 | `--sym-nodes N` | ペアあたりの最大探索ノード数（デフォルト50000） |
 | `--sr` / `--veripb` / `--bsr` | 証明形式（デフォルトSR） |
