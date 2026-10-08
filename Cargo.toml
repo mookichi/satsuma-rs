@@ -1,0 +1,20 @@
+[package]
+name = "satsuma"
+version = "1.4.0"
+edition = "2021"
+description = "Static symmetry breaking preprocessor for SAT (pure-Rust port of markusa4/satsuma)"
+license = "MIT"
+repository = "https://github.com/markusa4/satsuma"
+keywords = ["sat", "symmetry-breaking", "preprocessor", "dimacs"]
+categories = ["science"]
+
+[lib]
+name = "satsuma"
+path = "src/lib.rs"
+
+[[bin]]
+name = "satsuma"
+path = "src/bin/satsuma.rs"
+
+[profile.release]
+opt-level = 3
