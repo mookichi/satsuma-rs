@@ -228,7 +228,7 @@ fn shorten_supports(generators: &mut Vec<Permutation>, passes: usize) {
 /// Only the literal part is examined; images must stay literal vertices.
 /// Assigned literals must additionally be stabilized setwise (defense in
 /// depth alongside unit coloring in the model graph).
-fn verify_automorphism(db: &Cnf, perm: &[usize]) -> bool {
+pub(crate) fn verify_automorphism(db: &Cnf, perm: &[usize]) -> bool {
     let n_literals = 2 * db.n_variables();
     if perm.len() < n_literals {
         return false;

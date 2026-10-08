@@ -218,14 +218,13 @@ impl CnfWl {
             }
         }
         let var = lit.abs() as usize;
+        // Drain ALL watches on this variable. update_watches always removes
+        // the processed entry (relocating the watch as needed), so this
+        // terminates. (Breaking early here starves propagation.)
         while let Some(&clause_number) = self.variable_watches[var].last() {
             let pos = self.variable_watches[var].len() - 1;
             self.update_watches(clause_number, var, pos);
             if self.conflict {
-                break;
-            }
-            // `update_watches` removes the entry; loop until empty.
-            if self.variable_watches[var].len() == pos {
                 break;
             }
         }
@@ -303,8 +302,12 @@ impl CnfWl {
         );
         let (start, end) = self.clauses_pt[clause_number];
         let mut new_watch: Option<usize> = None;
+        // Seek a non-false replacement (unassigned OR true). Seeking only
+        // unassigned misses true literals in satisfied-but-unflagged clauses
+        // (e.g. appended breaking clauses referencing older assignments)
+        // and derives false conflicts. On unsatisfied clauses both coincide.
         for i in start..end {
-            if i != w1 && i != w2 && self.assigned(self.clauses[i]) == 0 {
+            if i != w1 && i != w2 && self.assigned(self.clauses[i]) != -1 {
                 new_watch = Some(i);
                 break;
             }

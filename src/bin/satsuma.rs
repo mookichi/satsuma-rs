@@ -306,11 +306,12 @@ fn main() {
     if !silent {
         eprintln!("c preprocessing finished");
         eprintln!(
-            "c [out: #vars {} #cls {} (+{} sbp) gens={}] iterations={} propagations={}",
+            "c [out: #vars {} #cls {} (+{} sbp) gens={} rows={}] iterations={} propagations={}",
             out.n_variables,
             out.n_clauses,
             out.n_sbp_clauses,
             out.n_generators,
+            out.n_row_groups,
             out.iterations,
             out.propagations
         );

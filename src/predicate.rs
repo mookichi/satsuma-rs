@@ -117,7 +117,23 @@ impl Predicate {
         if positions.is_empty() {
             return 0;
         }
+        self.add_chain_lex(base_vars, &positions, proof)
+    }
+
+    /// Chaining lex encoding for explicit `(x, px)` pairs: enforces the
+    /// ordered vectors `x_1..x_k <= px_1..px_k` lexicographically. Used both
+    /// for generator positions and for aligned row pairs (row breaking).
+    /// Returns the number of clauses added.
+    pub fn add_chain_lex(
+        &mut self,
+        base_vars: usize,
+        positions: &[(i32, i32)],
+        proof: Option<&mut Proof>,
+    ) -> usize {
         let k = positions.len();
+        if k == 0 {
+            return 0;
+        }
         let mut proof = proof;
         if k == 1 {
             // Single swap: full lex-leader is one binary clause, no aux vars.

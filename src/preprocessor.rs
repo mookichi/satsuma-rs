@@ -169,6 +169,7 @@ pub struct Output {
     pub n_sbp_clauses: usize,
     pub n_extra_variables: usize,
     pub n_generators: usize,
+    pub n_row_groups: usize,
     pub iterations: usize,
     pub propagations: usize,
     /// Proof stream when the preprocessor was given a proof buffer.
@@ -180,6 +181,63 @@ impl Output {
     pub fn is_unsat(&self) -> bool {
         self.n_clauses == 1 && self.dimacs.lines().any(|l| l.trim() == "0")
     }
+}
+
+/// Failed-literal probing: tentatively assign each unassigned variable both
+/// ways on a scratch clone; a conflicting side proves the opposite unit.
+/// Sound, and RUP-loggable (failed literals are RUP by construction).
+/// Only original variables (`1..=base_vars`) are probed. Derived units are
+/// applied immediately and logged. Bounded by `max_sweeps` full sweeps.
+/// Returns the number of newly derived units.
+fn probe_units(
+    formula: &mut CnfWl,
+    base_vars: usize,
+    max_sweeps: usize,
+    mut proof: Option<&mut Proof>,
+) -> usize {
+    let mut total = 0;
+    let mut trials: usize = 0;
+    const MAX_TRIALS: usize = 30_000;
+    for _ in 0..max_sweeps {
+        let mut sweep_units = 0;
+        for v in 1..=base_vars.min(formula.n_variables()) as i32 {
+            if formula.is_conflicting() {
+                break;
+            }
+            if formula.assigned(v) != 0 {
+                continue;
+            }
+            for &lit in &[v, -v] {
+                if trials >= MAX_TRIALS {
+                    break;
+                }
+                if formula.assigned(lit) != 0 || formula.is_conflicting() {
+                    break;
+                }
+                trials += 1;
+                let mut trial = formula.clone();
+                trial.assign_literal(lit);
+                trial.propagate();
+                if trial.is_conflicting() {
+                    formula.assign_literal(-lit);
+                    formula.propagate();
+                    total += 1;
+                    sweep_units += 1;
+                    if let Some(p) = proof.as_mut() {
+                        p.drat_clause(&[-lit]);
+                    }
+                    break;
+                }
+            }
+            if trials >= MAX_TRIALS {
+                break;
+            }
+        }
+        if sweep_units == 0 || formula.is_conflicting() {
+            break;
+        }
+    }
+    total
 }
 
 /// The preprocessor.
@@ -268,8 +326,9 @@ impl<P: SymmetryProvider> Preprocessor<P> {
         let mut sbp_base_vars: Option<usize> = None;
         // Detection budget decays after the first round (later rounds refine).
         let mut detect_budget_ms = self.config.sym_time_budget_ms;
-        // Generators found in the latest round (for reporting).
+        // Generators / row groups found in the latest round (for reporting).
         let mut last_generators = 0usize;
+        let mut last_row_groups = 0usize;
 
         // Final database, rebuilt every iteration.
         let mut db: Cnf;
@@ -418,6 +477,37 @@ impl<P: SymmetryProvider> Preprocessor<P> {
                     }
                     self.tracker.add_to_metric(Metric::SymLex, added as u64);
                 }
+                // Row symmetry: compact adjacent-row lex chains break full
+                // row interchangeability completely, independent of generic
+                // generators. Runs even with zero generators.
+                self.tracker.update_routine(Routine::DetectSpecial);
+                let row_groups =
+                    crate::structure::detect_row_groups(&db, &detect_db, &group.order);
+                if !row_groups.is_empty() {
+                    if sbp_base_vars.is_none() {
+                        sbp_base_vars = Some(db.n_variables());
+                    }
+                    let lex_base = sbp_base_vars.unwrap_or(db.n_variables());
+                    let mut row_added = 0;
+                    for row_group in &row_groups {
+                        for pair in row_group.rows.windows(2) {
+                            let positions: Vec<(i32, i32)> = pair[0]
+                                .iter()
+                                .zip(pair[1].iter())
+                                .take(self.config.break_depth.max(1))
+                                .map(|(&a, &b)| ((a + 1) as i32, (b + 1) as i32))
+                                .collect();
+                            row_added +=
+                                sbp.add_chain_lex(lex_base, &positions, self.proof.as_mut());
+                        }
+                    }
+                    self.tracker.add_to_metric(Metric::SymLex, row_added as u64);
+                    self.tracker.update_metric(
+                        Metric::Row,
+                        row_groups.len() as u64,
+                    );
+                    last_row_groups = row_groups.len();
+                }
             }
 
             // Iteration bound mirrors satsuma.h: raw = (S/s)^p clamped to
@@ -431,37 +521,48 @@ impl<P: SymmetryProvider> Preprocessor<P> {
 
             let orbitopal_only =
                 self.config.orbitopal_fixing && self.config.mode == Mode::Fix;
-            // Iterate only with genuine progress: newly added breaking clauses
-            // are appended to the persistent formula and must derive fresh
-            // assignments. Assignments are monotonic, so rounds are bounded by
-            // the variable count (plus `iteration_max`). Aux growth is capped
-            // as insurance against pathological blowup.
+            // Iterate on genuine progress: fresh assignments (from propagation
+            // or probing) are monotonic, so rounds are bounded by the variable
+            // count (plus `iteration_max`). Aux growth is capped as insurance
+            // against pathological blowup.
             let aux_base = sbp_base_vars.unwrap_or(db.n_variables()).max(1);
             let aux_capped = sbp.n_extra_variables() <= 8 * aux_base;
             if self.config.iterate
                 && orbitopal_only
                 && iteration < iteration_max
-                && sbp.n_clauses() > sbp_appended
                 && aux_capped
                 && (formula.n_variables() < 20_000)
             {
-                if appended_base_end.is_none() {
-                    appended_base_end = Some(formula.n_clauses());
+                if sbp.n_clauses() > sbp_appended {
+                    if appended_base_end.is_none() {
+                        appended_base_end = Some(formula.n_clauses());
+                    }
+                    let lex_base = sbp_base_vars.unwrap_or(db.n_variables());
+                    let need_vars = lex_base + sbp.n_extra_variables();
+                    if need_vars > formula.n_variables() {
+                        formula.extend_variables(need_vars - formula.n_variables());
+                    }
+                    for clause in &sbp.clauses()[sbp_appended..] {
+                        formula.add_clause(clause);
+                    }
+                    sbp_appended = sbp.n_clauses();
                 }
-                let lex_base = sbp_base_vars.unwrap_or(db.n_variables());
-                let need_vars = lex_base + sbp.n_extra_variables();
-                if need_vars > formula.n_variables() {
-                    formula.extend_variables(need_vars - formula.n_variables());
-                }
-                for clause in &sbp.clauses()[sbp_appended..] {
-                    formula.add_clause(clause);
-                }
-                sbp_appended = sbp.n_clauses();
                 let new_props = formula.propagate();
                 total_propagations += new_props;
                 self.tracker
                     .add_to_metric(Metric::Propagations, new_props as u64);
-                if new_props > 0 {
+                // Probing (failed literals): goes beyond UP, approximating
+                // orbitopal fixing strength. Sound and RUP-loggable. Runs
+                // whenever propagation stalls, even without new clauses.
+                let mut probed = 0;
+                if new_props == 0 && !formula.is_conflicting() {
+                    let lex_base = sbp_base_vars.unwrap_or(db.n_variables());
+                    probed = probe_units(formula, lex_base, 4, self.proof.as_mut());
+                    total_propagations += probed;
+                    self.tracker
+                        .add_to_metric(Metric::Propagations, probed as u64);
+                }
+                if new_props > 0 || probed > 0 {
                     iteration += 1;
                     self.tracker
                         .update_metric(Metric::Iterations, iteration as u64);
@@ -492,6 +593,7 @@ impl<P: SymmetryProvider> Preprocessor<P> {
                     n_sbp_clauses: 0,
                     n_extra_variables: 0,
                     n_generators: last_generators,
+                    n_row_groups: last_row_groups,
                     iterations: iteration,
                     propagations: total_propagations,
                     proof_text,
@@ -516,6 +618,7 @@ impl<P: SymmetryProvider> Preprocessor<P> {
                 n_sbp_clauses: sbp.n_clauses(),
                 n_extra_variables: sbp.n_extra_variables(),
                 n_generators: last_generators,
+                n_row_groups: last_row_groups,
                 iterations: iteration,
                 propagations: total_propagations,
                 proof_text,

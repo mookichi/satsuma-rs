@@ -52,6 +52,7 @@ pub mod parser;
 pub mod predicate;
 pub mod preprocessor;
 pub mod proof;
+pub mod structure;
 pub mod symmetry;
 pub mod tracker;
 
